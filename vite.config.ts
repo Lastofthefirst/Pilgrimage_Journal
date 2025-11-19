@@ -4,14 +4,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      'pdfmake/build/pdfmake': 'pdfmake/build/pdfmake.js',
-      'pdfmake/build/vfs_fonts': 'pdfmake/build/vfs_fonts.js'
-    }
-  },
   optimizeDeps: {
-    include: ['pdfmake']
+    include: ['jspdf']
   },
   plugins: [
     solid(),
@@ -48,7 +42,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff2}'],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB to accommodate pdfmake
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB to accommodate PDF libraries
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -76,7 +70,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'editor': ['@tiptap/core', '@tiptap/starter-kit'],
-          'pdf': ['pdfmake']
+          'pdf': ['jspdf']
         }
       }
     }

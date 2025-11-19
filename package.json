@@ -20,8 +20,6 @@
     "html2canvas": "^1.4.1",
     "idb": "^8.0.0",
     "jspdf": "^2.5.2",
-    "pdfmake": "^0.2.20",
-    "react-pdf-html": "^2.1.4",
     "solid-js": "^1.8.22",
     "solid-toast": "^0.5.0",
     "uuid": "^10.0.0"

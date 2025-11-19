@@ -10,17 +10,8 @@ import {
   getDateRange,
   formatTimestamp,
 } from '../utils/pdfHelpers';
-import * as pdfMakeLib from 'pdfmake/build/pdfmake';
-import * as pdfFonts from 'pdfmake/build/vfs_fonts';
+import jsPDF from 'jspdf';
 import toast from 'solid-toast';
-
-// TypeScript type for pdfMake
-const pdfMake = (pdfMakeLib as any).default || pdfMakeLib;
-
-// Register fonts
-if (pdfFonts && (pdfFonts as any).pdfMake) {
-  pdfMake.vfs = (pdfFonts as any).pdfMake.vfs;
-}
 
 interface AllData {
   textNotes: TextNote[];
@@ -33,7 +24,7 @@ interface ExportOptions {
   includeSiteInfo: boolean;
   includeImages: boolean;
   includeTimestamps: boolean;
-  orientation: 'portrait' | 'landscape';
+  pageOrientation: 'portrait' | 'landscape';
 }
 
 const Print = () => {
@@ -52,7 +43,7 @@ const Print = () => {
     includeSiteInfo: true,
     includeImages: false, // Default to false due to file size
     includeTimestamps: true,
-    orientation: 'portrait',
+    pageOrientation: 'portrait',
   });
 
   // Load all data on mount
@@ -94,10 +85,10 @@ const Print = () => {
   };
 
   const toggleOption = (option: keyof ExportOptions) => {
-    if (option === 'orientation') {
+    if (option === 'pageOrientation') {
       setExportOptions({
         ...exportOptions(),
-        orientation: exportOptions().orientation === 'portrait' ? 'landscape' : 'portrait',
+        pageOrientation: exportOptions().pageOrientation === 'portrait' ? 'landscape' : 'portrait',
       });
     } else {
       setExportOptions({
@@ -111,407 +102,292 @@ const Print = () => {
     setGenerating(true);
 
     try {
-      const data = allData();
-      const options = exportOptions();
+      const doc = new jsPDF({
+        orientation: exportOptions().pageOrientation,
+        unit: 'mm',
+        format: 'a4',
+      });
 
-      // Group notes by site
-      const groupedData = groupNotesBySite(
-        data.textNotes,
-        data.audioNotes,
-        data.imageNotes,
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 20;
+      let yPos = margin;
+
+      // Cover Page
+      doc.setFontSize(32);
+      doc.setTextColor(1, 93, 124); // Primary color
+      doc.text('My Pilgrimage Journal', pageWidth / 2, 100, { align: 'center' });
+
+      doc.setFontSize(16);
+      doc.setTextColor(100, 100, 100);
+      doc.text('A Spiritual Journey to the Holy Land', pageWidth / 2, 120, { align: 'center' });
+
+      doc.setFontSize(12);
+      const dateRangeText = getDateRange(allData().textNotes, allData().audioNotes, allData().imageNotes);
+      doc.text(dateRangeText, pageWidth / 2, 140, { align: 'center' });
+
+      doc.text(`Generated on ${new Date().toLocaleDateString()}`, pageWidth / 2, 150, { align: 'center' });
+
+      // New page for table of contents
+      doc.addPage();
+      yPos = margin;
+
+      doc.setFontSize(24);
+      doc.setTextColor(1, 93, 124);
+      doc.text('Table of Contents', margin, yPos);
+      yPos += 15;
+
+      // Get sites with notes
+      const sitesWithNotes = groupNotesBySite(
+        allData().textNotes,
+        allData().audioNotes,
+        allData().imageNotes,
         sites
       );
 
-      // Build table of contents
-      const tocItems: any[] = [];
-      groupedData.forEach((group, index) => {
-        tocItems.push({
-          text: group.site.name,
-          style: 'tocItem',
-          tocItem: true,
-        });
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      sitesWithNotes.forEach((siteData, index) => {
+        if (yPos > pageHeight - margin) {
+          doc.addPage();
+          yPos = margin;
+        }
+        doc.text(`${index + 1}. ${siteData.site.name}`, margin + 5, yPos);
+        yPos += 7;
       });
 
-      // Build site sections
-      const siteSections: any[] = [];
+      // Site sections
+      for (const siteData of sitesWithNotes) {
+        doc.addPage();
+        yPos = margin;
 
-      for (const group of groupedData) {
-        const siteContent: any[] = [];
+        // Site name
+        doc.setFontSize(20);
+        doc.setTextColor(1, 93, 124);
+        doc.text(siteData.site.name, margin, yPos);
+        yPos += 10;
 
-        // Site Header
-        siteContent.push({
-          text: group.site.name,
-          style: 'siteHeader',
-          pageBreak: siteSections.length > 0 ? 'before' : undefined,
-          tocItem: group.site.name,
-        });
+        // City
+        doc.setFontSize(12);
+        doc.setTextColor(100, 100, 100);
+        doc.text(siteData.site.city, margin, yPos);
+        yPos += 10;
 
-        siteContent.push({
-          text: group.site.city,
-          style: 'siteCity',
-          margin: [0, 0, 0, 10],
-        });
+        // Quote (if enabled)
+        if (exportOptions().includeSiteInfo && siteData.site.quote) {
+          doc.setFontSize(11);
+          doc.setTextColor(60, 60, 60);
+          doc.setFont('helvetica', 'italic');
+          const quoteLines = doc.splitTextToSize(siteData.site.quote, pageWidth - 2 * margin - 10);
+          doc.text(quoteLines, margin + 5, yPos);
+          yPos += quoteLines.length * 6 + 5;
+          doc.setFont('helvetica', 'normal');
+        }
 
-        // Site Info (if enabled)
-        if (options.includeSiteInfo) {
-          // Quote
-          siteContent.push({
-            text: group.site.quote,
-            style: 'quote',
-          });
-
-          // Reference
-          if (group.site.reference) {
-            siteContent.push({
-              text: `— ${group.site.reference}`,
-              style: 'reference',
-            });
+        // Reference (if enabled)
+        if (exportOptions().includeSiteInfo && siteData.site.reference) {
+          if (yPos > pageHeight - margin - 20) {
+            doc.addPage();
+            yPos = margin;
           }
+          doc.setFontSize(10);
+          doc.setTextColor(100, 100, 100);
+          doc.setFont('helvetica', 'italic');
+          doc.text(`— ${siteData.site.reference}`, margin + 5, yPos);
+          yPos += 8;
+          doc.setFont('helvetica', 'normal');
+        }
 
-          // Address
-          if (group.site.address) {
-            siteContent.push({
-              text: 'Address:',
-              style: 'subheading',
-              margin: [0, 10, 0, 3],
-            });
-            siteContent.push({
-              text: group.site.address,
-              style: 'address',
-              margin: [0, 0, 0, 10],
-            });
+        // Address (if enabled)
+        if (exportOptions().includeSiteInfo && siteData.site.address) {
+          if (yPos > pageHeight - margin - 20) {
+            doc.addPage();
+            yPos = margin;
+          }
+          doc.setFontSize(11);
+          doc.setTextColor(0, 0, 0);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Address:', margin, yPos);
+          yPos += 6;
+          doc.setFont('helvetica', 'normal');
+
+          doc.setFontSize(10);
+          doc.setTextColor(100, 100, 100);
+          const addressLines = doc.splitTextToSize(siteData.site.address, pageWidth - 2 * margin - 10);
+          doc.text(addressLines, margin + 5, yPos);
+          yPos += addressLines.length * 5 + 10;
+        }
+
+        // Text notes
+        if (siteData.textNotes.length > 0) {
+          if (yPos > pageHeight - margin - 20) {
+            doc.addPage();
+            yPos = margin;
+          }
+          doc.setFontSize(14);
+          doc.setTextColor(1, 93, 124);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Notes', margin, yPos);
+          yPos += 8;
+          doc.setFont('helvetica', 'normal');
+
+          for (const note of siteData.textNotes) {
+            if (yPos > pageHeight - margin - 30) {
+              doc.addPage();
+              yPos = margin;
+            }
+
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.setFont('helvetica', 'bold');
+            doc.text(note.title, margin + 5, yPos);
+            yPos += 6;
+            doc.setFont('helvetica', 'normal');
+
+            if (exportOptions().includeTimestamps) {
+              doc.setFontSize(9);
+              doc.setTextColor(150, 150, 150);
+              doc.text(formatTimestamp(note.created), margin + 5, yPos);
+              yPos += 5;
+            }
+
+            // Note content
+            doc.setFontSize(10);
+            doc.setTextColor(40, 40, 40);
+            const content = stripHtml(note.body);
+            const contentLines = doc.splitTextToSize(content, pageWidth - 2 * margin - 10);
+
+            // Handle pagination for long notes
+            for (const line of contentLines) {
+              if (yPos > pageHeight - margin - 10) {
+                doc.addPage();
+                yPos = margin;
+              }
+              doc.text(line, margin + 5, yPos);
+              yPos += 5;
+            }
+            yPos += 8;
           }
         }
 
-        // TEXT NOTES
-        if (group.textNotes.length > 0) {
-          siteContent.push({
-            text: 'Text Notes',
-            style: 'sectionHeader',
-            margin: [0, 10, 0, 8],
-          });
-
-          for (const note of group.textNotes) {
-            const noteContent: any[] = [];
-
-            // Note title
-            noteContent.push({
-              text: note.title,
-              style: 'noteTitle',
-            });
-
-            // Timestamp (if enabled)
-            if (options.includeTimestamps) {
-              noteContent.push({
-                text: formatTimestamp(note.created),
-                style: 'timestamp',
-              });
-            }
-
-            // Note content (convert HTML to plain text)
-            const noteText = stripHtml(note.body);
-            noteContent.push({
-              text: noteText,
-              style: 'noteBody',
-              margin: [0, 3, 0, 10],
-            });
-
-            siteContent.push({
-              stack: noteContent,
-              margin: [5, 0, 0, 8],
-            });
+        // Photos (if enabled)
+        if (exportOptions().includeImages && siteData.imageNotes.length > 0) {
+          if (yPos > pageHeight - margin - 20) {
+            doc.addPage();
+            yPos = margin;
           }
-        }
+          doc.setFontSize(14);
+          doc.setTextColor(1, 93, 124);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Photos', margin, yPos);
+          yPos += 8;
+          doc.setFont('helvetica', 'normal');
 
-        // IMAGE NOTES
-        if (group.imageNotes.length > 0) {
-          siteContent.push({
-            text: 'Photos',
-            style: 'sectionHeader',
-            margin: [0, 10, 0, 8],
-          });
-
-          for (const note of group.imageNotes) {
-            const imageNoteContent: any[] = [];
-
-            // Note title
-            imageNoteContent.push({
-              text: note.title,
-              style: 'noteTitle',
-            });
-
-            // Timestamp (if enabled)
-            if (options.includeTimestamps) {
-              imageNoteContent.push({
-                text: formatTimestamp(note.created),
-                style: 'timestamp',
-              });
+          for (const photo of siteData.imageNotes) {
+            if (yPos > pageHeight - 90) {
+              doc.addPage();
+              yPos = margin;
             }
 
-            // Image (if enabled)
-            if (options.includeImages && data.imageBlobs[note.id]) {
+            doc.setFontSize(11);
+            doc.setTextColor(0, 0, 0);
+            doc.text(photo.title, margin + 5, yPos);
+            yPos += 6;
+
+            if (exportOptions().includeTimestamps) {
+              doc.setFontSize(9);
+              doc.setTextColor(150, 150, 150);
+              doc.text(formatTimestamp(photo.created), margin + 5, yPos);
+              yPos += 5;
+            }
+
+            const imgData = allData().imageBlobs[photo.id];
+            if (imgData) {
               try {
-                imageNoteContent.push({
-                  image: data.imageBlobs[note.id],
-                  width: options.orientation === 'portrait' ? 400 : 600,
-                  margin: [0, 5, 0, 10],
-                });
+                const imgWidth = exportOptions().pageOrientation === 'portrait' ? 80 : 120;
+                const imgHeight = 60;
+
+                if (yPos + imgHeight > pageHeight - margin) {
+                  doc.addPage();
+                  yPos = margin;
+                }
+
+                doc.addImage(imgData, 'JPEG', margin + 5, yPos, imgWidth, imgHeight);
+                yPos += imgHeight + 10;
               } catch (error) {
-                console.error('Error adding image to PDF:', error);
-                imageNoteContent.push({
-                  text: '[Image could not be loaded]',
-                  style: 'error',
-                });
+                console.error('Error adding image:', error);
+                doc.setFontSize(9);
+                doc.setTextColor(150, 150, 150);
+                doc.text('[Image could not be loaded]', margin + 5, yPos);
+                yPos += 10;
               }
             }
-
-            siteContent.push({
-              stack: imageNoteContent,
-              margin: [5, 0, 0, 10],
-            });
           }
         }
 
-        // AUDIO NOTES
-        if (group.audioNotes.length > 0) {
-          siteContent.push({
-            text: 'Audio Notes',
-            style: 'sectionHeader',
-            margin: [0, 10, 0, 8],
-          });
+        // Audio notes
+        if (siteData.audioNotes.length > 0) {
+          if (yPos > pageHeight - margin - 20) {
+            doc.addPage();
+            yPos = margin;
+          }
+          doc.setFontSize(14);
+          doc.setTextColor(1, 93, 124);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Audio Recordings', margin, yPos);
+          yPos += 8;
+          doc.setFont('helvetica', 'normal');
 
-          for (const note of group.audioNotes) {
-            const audioNoteContent: any[] = [];
-
-            // Note title
-            audioNoteContent.push({
-              text: note.title,
-              style: 'noteTitle',
-            });
-
-            // Timestamp (if enabled)
-            if (options.includeTimestamps) {
-              audioNoteContent.push({
-                text: formatTimestamp(note.created),
-                style: 'timestamp',
-              });
+          for (const audio of siteData.audioNotes) {
+            if (yPos > pageHeight - margin - 15) {
+              doc.addPage();
+              yPos = margin;
             }
 
-            // Audio info
-            audioNoteContent.push({
-              text: '[Audio Recording - Not playable in PDF]',
-              style: 'audioNote',
-              margin: [0, 3, 0, 10],
-            });
+            doc.setFontSize(11);
+            doc.setTextColor(0, 0, 0);
+            doc.text(`🎤 ${audio.title}`, margin + 5, yPos);
+            yPos += 6;
 
-            siteContent.push({
-              stack: audioNoteContent,
-              margin: [5, 0, 0, 8],
-            });
+            if (exportOptions().includeTimestamps) {
+              doc.setFontSize(9);
+              doc.setTextColor(150, 150, 150);
+              doc.text(formatTimestamp(audio.created), margin + 5, yPos);
+              yPos += 6;
+            }
+
+            doc.setFontSize(9);
+            doc.setTextColor(100, 100, 100);
+            doc.setFont('helvetica', 'italic');
+            doc.text('[Audio Recording - Not playable in PDF]', margin + 5, yPos);
+            yPos += 8;
+            doc.setFont('helvetica', 'normal');
           }
         }
-
-        siteSections.push(...siteContent);
       }
 
-      // Document definition
-      const docDefinition: any = {
-        pageSize: 'A4',
-        pageOrientation: options.orientation,
-        pageMargins: [40, 60, 40, 60],
+      // Add page numbers (skip cover page)
+      const pageCount = doc.internal.pages.length - 1;
+      for (let i = 2; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(9);
+        doc.setTextColor(150, 150, 150);
+        doc.text(
+          `Page ${i - 1} of ${pageCount - 1}`,
+          pageWidth / 2,
+          pageHeight - 10,
+          { align: 'center' }
+        );
+      }
 
-        content: [
-          // Cover page
-          {
-            stack: [
-              {
-                text: 'My Pilgrimage Journal',
-                style: 'coverTitle',
-                margin: [0, 100, 0, 20],
-              },
-              {
-                text: 'A Spiritual Journey to the Holy Land',
-                style: 'coverSubtitle',
-                margin: [0, 0, 0, 20],
-              },
-              {
-                text: dateRange(),
-                style: 'coverDate',
-              },
-              {
-                text: `Generated: ${new Date().toLocaleDateString('en-US', {
-                  month: 'long',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}`,
-                style: 'generatedDate',
-                margin: [0, 20, 0, 0],
-              },
-            ],
-            margin: [0, 0, 0, 0],
-          },
-          {
-            text: '',
-            pageBreak: 'after',
-          },
-
-          // Table of contents
-          {
-            text: 'Table of Contents',
-            style: 'tocHeader',
-            margin: [0, 0, 0, 20],
-          },
-          {
-            toc: {
-              title: { text: '' },
-            },
-            margin: [0, 0, 0, 20],
-          },
-          {
-            text: '',
-            pageBreak: 'after',
-          },
-
-          // Site sections
-          ...siteSections,
-        ],
-
-        styles: {
-          coverTitle: {
-            fontSize: 32,
-            bold: true,
-            alignment: 'center',
-            color: '#015D7C',
-          },
-          coverSubtitle: {
-            fontSize: 18,
-            italics: true,
-            alignment: 'center',
-            color: '#666666',
-          },
-          coverDate: {
-            fontSize: 14,
-            alignment: 'center',
-            color: '#333333',
-          },
-          generatedDate: {
-            fontSize: 10,
-            alignment: 'center',
-            color: '#999999',
-          },
-          tocHeader: {
-            fontSize: 24,
-            bold: true,
-            color: '#015D7C',
-          },
-          tocItem: {
-            fontSize: 12,
-            margin: [0, 3, 0, 3],
-          },
-          siteHeader: {
-            fontSize: 20,
-            bold: true,
-            color: '#015D7C',
-            margin: [0, 0, 0, 5],
-          },
-          siteCity: {
-            fontSize: 14,
-            italics: true,
-            color: '#666666',
-          },
-          quote: {
-            fontSize: 11,
-            italics: true,
-            color: '#444444',
-            margin: [20, 10, 20, 5],
-          },
-          reference: {
-            fontSize: 10,
-            italics: true,
-            color: '#666666',
-            margin: [20, 0, 20, 10],
-          },
-          subheading: {
-            fontSize: 11,
-            bold: true,
-            color: '#333333',
-          },
-          address: {
-            fontSize: 10,
-            color: '#666666',
-          },
-          sectionHeader: {
-            fontSize: 14,
-            bold: true,
-            color: '#015D7C',
-          },
-          noteTitle: {
-            fontSize: 12,
-            bold: true,
-            color: '#333333',
-            margin: [0, 0, 0, 3],
-          },
-          timestamp: {
-            fontSize: 9,
-            italics: true,
-            color: '#999999',
-            margin: [0, 0, 0, 3],
-          },
-          noteBody: {
-            fontSize: 10,
-            color: '#333333',
-            lineHeight: 1.3,
-          },
-          audioNote: {
-            fontSize: 9,
-            italics: true,
-            color: '#666666',
-          },
-          error: {
-            fontSize: 9,
-            color: '#999999',
-            italics: true,
-          },
-        },
-
-        defaultStyle: {
-          font: 'Helvetica',
-        },
-
-        // Footer
-        footer: (currentPage: number, pageCount: number) => {
-          return {
-            columns: [
-              {
-                text: 'Pilgrim Notes',
-                alignment: 'left',
-                fontSize: 8,
-                color: '#999999',
-                margin: [40, 0, 0, 0],
-              },
-              {
-                text: `Page ${currentPage} of ${pageCount}`,
-                alignment: 'right',
-                fontSize: 8,
-                color: '#999999',
-                margin: [0, 0, 40, 0],
-              },
-            ],
-          };
-        },
-      };
-
-      // Generate PDF
-      const pdfDocGenerator = pdfMake.createPdf(docDefinition);
-
-      pdfDocGenerator.getBlob((blob: Blob) => {
-        setGeneratedPDF(blob);
-        setGenerating(false);
-        toast.success('PDF generated successfully!');
-      });
+      // Save PDF as blob
+      const blob = doc.output('blob');
+      setGeneratedPDF(blob);
+      toast.success('PDF generated successfully!');
     } catch (error) {
-      console.error('Error generating PDF:', error);
+      console.error('PDF generation error:', error);
       toast.error('Failed to generate PDF');
+    } finally {
       setGenerating(false);
     }
   };
@@ -729,9 +605,9 @@ const Print = () => {
                 <div class="font-semibold text-gray-900 mb-3">Page Orientation</div>
                 <div class="flex gap-3">
                   <button
-                    onClick={() => setExportOptions({ ...exportOptions(), orientation: 'portrait' })}
+                    onClick={() => setExportOptions({ ...exportOptions(), pageOrientation: 'portrait' })}
                     class={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                      exportOptions().orientation === 'portrait'
+                      exportOptions().pageOrientation === 'portrait'
                         ? 'bg-blue-600 text-white shadow-lg scale-105'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
@@ -740,9 +616,9 @@ const Print = () => {
                     <div>Portrait</div>
                   </button>
                   <button
-                    onClick={() => setExportOptions({ ...exportOptions(), orientation: 'landscape' })}
+                    onClick={() => setExportOptions({ ...exportOptions(), pageOrientation: 'landscape' })}
                     class={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
-                      exportOptions().orientation === 'landscape'
+                      exportOptions().pageOrientation === 'landscape'
                         ? 'bg-blue-600 text-white shadow-lg scale-105'
                         : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                     }`}
