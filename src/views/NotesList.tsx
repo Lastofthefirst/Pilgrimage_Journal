@@ -10,6 +10,7 @@ import ImageNoteCard from '../components/ImageNoteCard';
 import SiteCard from '../components/SiteCard';
 import Editor from './Editor';
 import Print from './Print';
+import Icon from '../components/ui/Icon';
 import { v4 as uuidv4 } from 'uuid';
 import toast from 'solid-toast';
 
@@ -107,16 +108,7 @@ const NotesList = () => {
           class="p-2"
           style={{ background: colors.primaryBg }}
         >
-          <svg
-            width="30"
-            height="30"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={colors.primaryText}
-            stroke-width="2"
-          >
-            <path d="M3 12h18M3 6h18M3 18h18" />
-          </svg>
+          <Icon name="bars-3" size={30} style={{ color: colors.primaryText }} />
         </button>
 
         {/* Search Input */}
@@ -143,28 +135,10 @@ const NotesList = () => {
           <Show
             when={showSites()}
             fallback={
-              <svg
-                width="30"
-                height="30"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke={colors.primaryText}
-                stroke-width="2"
-              >
-                <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
+              <Icon name="document-text" size={30} style={{ color: colors.primaryText }} />
             }
           >
-            <svg
-              width="30"
-              height="30"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={colors.primaryText}
-              stroke-width="2"
-            >
-              <path d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-            </svg>
+            <Icon name="map-pin" size={30} style={{ color: colors.primaryText }} />
           </Show>
         </button>
       </div>
