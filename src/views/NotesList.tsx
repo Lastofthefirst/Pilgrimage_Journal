@@ -6,6 +6,10 @@ import type { TextNote, AudioNote, ImageNote, Note, Site } from '../types';
 import Sites from './Sites';
 import SitePage from './SitePage';
 import Editor from './Editor';
+import Print from './Print';
+import Card from '../components/Card';
+import BottomNav, { type TabId } from '../components/BottomNav';
+import Icon from '../components/ui/Icon';
 
 type ViewMode = 'notes' | 'sites';
 
@@ -19,6 +23,9 @@ interface SiteWithCounts extends Site {
 const NotesList = () => {
   const [viewMode, setViewMode] = createSignal<ViewMode>('notes');
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [searchFocused, setSearchFocused] = createSignal(false);
+  const [activeTab, setActiveTab] = createSignal<TabId>('notes');
+  const [showMenuModal, setShowMenuModal] = createSignal(false);
 
   // Load all notes from IndexedDB
   const [allNotes] = createResource(async () => {
@@ -114,6 +121,32 @@ const NotesList = () => {
     navigationStore.push(<Editor />);
   };
 
+  const handleExportToPDF = () => {
+    // Navigate to Print view for PDF export
+    navigationStore.push(<Print />);
+  };
+
+  const handleTabChange = (tab: TabId) => {
+    setActiveTab(tab);
+
+    switch (tab) {
+      case 'notes':
+        setViewMode('notes');
+        setShowMenuModal(false);
+        break;
+      case 'sites':
+        setViewMode('sites');
+        setShowMenuModal(false);
+        break;
+      case 'add':
+        handleAddNote();
+        break;
+      case 'menu':
+        setShowMenuModal(true);
+        break;
+    }
+  };
+
   const getNoteIcon = (note: Note) => {
     switch (note.type) {
       case 'text':
@@ -127,122 +160,175 @@ const NotesList = () => {
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
     return new Intl.DateTimeFormat('en-US', {
       month: 'short',
       day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
+      year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
     }).format(date);
   };
 
   return (
-    <div class="flex flex-col h-screen bg-gray-50">
-      {/* Top Bar */}
-      <div class="bg-white border-b border-gray-200 px-4 py-3 shadow-sm">
-        <h1 class="text-2xl font-bold text-gray-900 mb-3">Pilgrim Notes</h1>
+    <div class="flex flex-col h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-gray-50">
+      {/* Beautiful Header with Gradient */}
+      <div class="bg-gradient-to-br from-[#015D7C] via-[#0284A8] to-[#0891B2] shadow-lg">
+        <div class="px-6 pt-6 pb-5">
+          {/* Title */}
+          <h1 class="text-3xl font-display font-bold text-white mb-6 tracking-tight">
+            Pilgrim Notes
+          </h1>
 
-        {/* View Mode Toggle */}
-        <div class="flex gap-2 mb-3">
-          <button
-            onClick={() => setViewMode('notes')}
-            class={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
-              viewMode() === 'notes'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Notes View
-          </button>
-          <button
-            onClick={() => setViewMode('sites')}
-            class={`flex-1 py-2 px-4 rounded-lg font-medium transition-colors ${
-              viewMode() === 'sites'
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
-          >
-            Sites View
-          </button>
-        </div>
+          {/* Animated Search Bar */}
+          <div class={`transition-all duration-300 ${searchFocused() ? 'scale-[1.02]' : ''}`}>
+            <div class="relative">
+              <input
+                type="text"
+                placeholder={viewMode() === 'notes' ? 'Search your notes...' : 'Search sacred sites...'}
+                value={searchQuery()}
+                onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                onFocus={() => setSearchFocused(true)}
+                onBlur={() => setSearchFocused(false)}
+                class="w-full px-5 py-4 pl-14 bg-white/95 backdrop-blur-md border-2 border-white/50 rounded-2xl focus:outline-none focus:ring-4 focus:ring-white/30 focus:border-white text-gray-900 placeholder-gray-500 shadow-xl transition-all font-medium"
+              />
+              <span class="absolute left-5 top-1/2 -translate-y-1/2 text-2xl">
+                🔍
+              </span>
+              <Show when={searchQuery()}>
+                <button
+                  onClick={() => setSearchQuery('')}
+                  class="absolute right-4 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center bg-gray-200 hover:bg-gray-300 rounded-full transition-colors active-scale"
+                >
+                  <span class="text-gray-600 text-lg">×</span>
+                </button>
+              </Show>
+            </div>
+          </div>
 
-        {/* Search Bar */}
-        <div class="relative">
-          <input
-            type="text"
-            placeholder={viewMode() === 'notes' ? 'Search notes...' : 'Search sites...'}
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="w-full px-4 py-2 pl-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+          {/* Export to PDF Button */}
+          <Show when={(allNotes()?.all.length || 0) > 0}>
+            <button
+              onClick={handleExportToPDF}
+              class="w-full mt-4 py-3.5 px-5 glass-dark text-white rounded-2xl font-bold hover:bg-white/80 hover:text-[#015D7C] active:scale-98 transition-all shadow-xl flex items-center justify-center gap-3"
+            >
+              <span class="text-2xl">📖</span>
+              <span>Export to PDF</span>
+              <span class="ml-auto bg-white/30 px-3 py-1 rounded-full text-xs font-semibold">
+                {allNotes()?.all.length}
+              </span>
+            </button>
+          </Show>
         </div>
       </div>
 
-      {/* Content Area */}
-      <div class="flex-1 overflow-y-auto">
+      {/* Content Area - padding for BottomNav */}
+      <div class="flex-1 overflow-y-auto pb-24">
         <Show
           when={!allNotes.loading}
           fallback={
-            <div class="flex items-center justify-center h-full">
-              <div class="text-gray-500">Loading...</div>
+            <div class="flex flex-col items-center justify-center h-full">
+              <div class="animate-pulse text-6xl mb-4">📖</div>
+              <div class="text-gray-600 font-medium">Loading your pilgrimage...</div>
             </div>
           }
         >
           <Show when={viewMode() === 'sites'}>
             {/* Sites Grid View */}
-            <div class="p-4 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              <For each={filteredSites()}>
-                {(site) => (
-                  <div
-                    onClick={() => handleSiteClick(site)}
-                    class="bg-white rounded-lg shadow-md overflow-hidden cursor-pointer transition-transform hover:scale-105 active:scale-95"
-                  >
-                    <div class="aspect-video w-full overflow-hidden bg-gray-200">
-                      <img
-                        src={site.image}
-                        alt={site.name}
-                        class="w-full h-full object-cover"
-                        loading="lazy"
-                      />
-                    </div>
-                    <div class="p-3">
-                      <h3 class="font-semibold text-sm text-gray-900 line-clamp-2 mb-1">
-                        {site.name}
-                      </h3>
-                      <p class="text-xs text-gray-600 mb-2">{site.city}</p>
-                      <p class="text-xs text-gray-500 line-clamp-2 mb-2">
-                        {site.quote}
-                      </p>
-                      <Show when={site.totalCount > 0}>
-                        <div class="flex gap-2 text-xs text-gray-600">
-                          <Show when={site.textCount > 0}>
-                            <span>📝 {site.textCount}</span>
-                          </Show>
-                          <Show when={site.audioCount > 0}>
-                            <span>🎤 {site.audioCount}</span>
-                          </Show>
-                          <Show when={site.imageCount > 0}>
-                            <span>📷 {site.imageCount}</span>
-                          </Show>
-                        </div>
-                      </Show>
-                    </div>
+            <div class="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+              <Show
+                when={filteredSites().length > 0}
+                fallback={
+                  <div class="col-span-full text-center py-16">
+                    <div class="text-6xl mb-4 animate-pulse">🔍</div>
+                    <p class="text-xl text-gray-600 font-medium mb-2">No sites found</p>
+                    <p class="text-sm text-gray-500">Try a different search term</p>
                   </div>
-                )}
-              </For>
+                }
+              >
+                <For each={filteredSites()}>
+                  {(site) => (
+                    <Card
+                      image={site.image}
+                      imageAlt={site.name}
+                      onClick={() => handleSiteClick(site)}
+                      hoverable
+                      variant="elevated"
+                      imageGradient
+                    >
+                      <div class="space-y-2">
+                        <h3 class="font-display font-bold text-xl text-gray-900 line-clamp-2 leading-tight">
+                          {site.name}
+                        </h3>
+                        <p class="text-sm text-gray-600 font-medium flex items-center gap-1">
+                          <span>📍</span>
+                          {site.city}
+                        </p>
+                        <p class="text-sm text-gray-600 line-clamp-2 italic leading-relaxed">
+                          "{site.quote}"
+                        </p>
+                        <Show when={site.totalCount > 0}>
+                          <div class="flex gap-3 pt-2 border-t border-gray-100">
+                            <Show when={site.textCount > 0}>
+                              <div class="flex items-center gap-1 text-xs font-semibold text-[#015D7C] bg-blue-50 px-2 py-1 rounded-lg">
+                                <span>📝</span>
+                                <span>{site.textCount}</span>
+                              </div>
+                            </Show>
+                            <Show when={site.audioCount > 0}>
+                              <div class="flex items-center gap-1 text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-1 rounded-lg">
+                                <span>🎤</span>
+                                <span>{site.audioCount}</span>
+                              </div>
+                            </Show>
+                            <Show when={site.imageCount > 0}>
+                              <div class="flex items-center gap-1 text-xs font-semibold text-green-600 bg-green-50 px-2 py-1 rounded-lg">
+                                <span>📷</span>
+                                <span>{site.imageCount}</span>
+                              </div>
+                            </Show>
+                          </div>
+                        </Show>
+                      </div>
+                    </Card>
+                  )}
+                </For>
+              </Show>
             </div>
           </Show>
 
           <Show when={viewMode() === 'notes'}>
             {/* Notes List View */}
-            <div class="p-4 space-y-3">
+            <div class="p-5 space-y-4 max-w-4xl mx-auto">
               <Show
                 when={filteredNotes().length > 0}
                 fallback={
-                  <div class="text-center py-12 text-gray-500">
-                    <p class="text-lg mb-2">No notes yet</p>
-                    <p class="text-sm">Tap the + button to create your first note</p>
+                  <div class="text-center py-20">
+                    <div class="text-7xl mb-6 animate-float">✍️</div>
+                    <p class="text-2xl font-bold text-gray-800 mb-3">
+                      {searchQuery() ? 'No notes found' : 'Begin Your Journey'}
+                    </p>
+                    <p class="text-gray-600 mb-8 max-w-md mx-auto leading-relaxed">
+                      {searchQuery()
+                        ? 'Try a different search term'
+                        : 'Capture your pilgrimage moments, reflections, and sacred experiences'}
+                    </p>
+                    <Show when={!searchQuery()}>
+                      <button
+                        onClick={handleAddNote}
+                        class="bg-gradient-to-r from-[#015D7C] to-[#0284A8] text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-2xl hover:shadow-xl hover:scale-105 active:scale-95 transition-all"
+                      >
+                        Create Your First Note
+                      </button>
+                    </Show>
                   </div>
                 }
               >
@@ -250,26 +336,33 @@ const NotesList = () => {
                   {(note) => (
                     <div
                       onClick={() => handleNoteClick(note)}
-                      class="bg-white rounded-lg shadow-sm p-4 cursor-pointer transition-shadow hover:shadow-md active:shadow-sm"
+                      class="bg-white rounded-2xl shadow-md hover:shadow-2xl p-5 cursor-pointer transition-all duration-300 hover:-translate-y-1 active-scale border border-gray-100 animate-scale-in"
                     >
-                      <div class="flex items-start gap-3">
-                        <div class="text-2xl flex-shrink-0">
+                      <div class="flex items-start gap-4">
+                        <div class="text-4xl flex-shrink-0 mt-1">
                           {getNoteIcon(note)}
                         </div>
                         <div class="flex-1 min-w-0">
-                          <h3 class="font-semibold text-gray-900 truncate mb-1">
-                            {note.title}
+                          <h3 class="font-bold text-xl text-gray-900 mb-2 line-clamp-1">
+                            {note.title || 'Untitled Note'}
                           </h3>
-                          <p class="text-sm text-gray-600 mb-2">{note.site}</p>
+                          <div class="flex items-center gap-2 mb-3">
+                            <span class="text-sm font-medium text-[#015D7C] bg-blue-50 px-3 py-1 rounded-full">
+                              {note.site}
+                            </span>
+                            <span class="text-xs text-gray-500 font-medium">
+                              {formatDate(note.created)}
+                            </span>
+                          </div>
                           <Show when={note.type === 'text'}>
                             <div
-                              class="text-sm text-gray-700 line-clamp-2 mb-2"
+                              class="text-gray-700 line-clamp-2 leading-relaxed prose prose-sm max-w-none"
                               innerHTML={(note as TextNote).body}
                             />
                           </Show>
-                          <p class="text-xs text-gray-500">
-                            {formatDate(note.created)}
-                          </p>
+                        </div>
+                        <div class="text-gray-400 text-xl flex-shrink-0">
+                          →
                         </div>
                       </div>
                     </div>
@@ -281,15 +374,86 @@ const NotesList = () => {
         </Show>
       </div>
 
-      {/* FAB Button for adding new text note */}
-      <Show when={viewMode() === 'notes'}>
-        <button
-          onClick={handleAddNote}
-          class="fixed bottom-6 right-6 w-14 h-14 bg-blue-600 text-white rounded-full shadow-lg flex items-center justify-center text-2xl hover:bg-blue-700 active:bg-blue-800 transition-colors"
-          aria-label="Add new note"
+      {/* Bottom Navigation */}
+      <BottomNav activeTab={activeTab()} onTabChange={handleTabChange} />
+
+      {/* Menu Modal */}
+      <Show when={showMenuModal()}>
+        <div
+          class="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end justify-center p-4"
+          onClick={() => setShowMenuModal(false)}
         >
-          +
-        </button>
+          <div
+            class="bg-white rounded-3xl shadow-2xl max-w-md w-full overflow-hidden animate-slide-up"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div class="p-6">
+              <div class="flex items-center justify-between mb-6">
+                <h2 class="text-2xl font-bold text-gray-900">Menu</h2>
+                <button
+                  onClick={() => setShowMenuModal(false)}
+                  class="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                  aria-label="Close menu"
+                >
+                  <Icon name="x-mark" size={24} class="text-gray-600" />
+                </button>
+              </div>
+
+              <div class="flex flex-col gap-3">
+                <button
+                  onClick={() => {
+                    handleExportToPDF();
+                    setShowMenuModal(false);
+                  }}
+                  class="flex items-center gap-4 p-4 rounded-xl bg-gradient-to-r from-[#015D7C]/10 to-[#0284A8]/10 hover:from-[#015D7C]/20 hover:to-[#0284A8]/20 transition-all active:scale-95"
+                >
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-[#015D7C] to-[#0284A8] flex items-center justify-center">
+                    <Icon name="printer" size={24} class="text-white" />
+                  </div>
+                  <div class="flex-1 text-left">
+                    <h3 class="font-semibold text-gray-900">Export to PDF</h3>
+                    <p class="text-sm text-gray-600">Print or save your notes</p>
+                  </div>
+                  <Icon name="chevron-right" size={20} class="text-gray-400" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    // TODO: Add share functionality
+                    setShowMenuModal(false);
+                  }}
+                  class="flex items-center gap-4 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-all active:scale-95"
+                >
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-green-500 to-green-600 flex items-center justify-center">
+                    <Icon name="share" size={24} class="text-white" />
+                  </div>
+                  <div class="flex-1 text-left">
+                    <h3 class="font-semibold text-gray-900">Share</h3>
+                    <p class="text-sm text-gray-600">Share your journal</p>
+                  </div>
+                  <Icon name="chevron-right" size={20} class="text-gray-400" />
+                </button>
+
+                <button
+                  onClick={() => {
+                    // TODO: Add settings functionality
+                    setShowMenuModal(false);
+                  }}
+                  class="flex items-center gap-4 p-4 rounded-xl bg-gray-50 hover:bg-gray-100 transition-all active:scale-95"
+                >
+                  <div class="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-purple-600 flex items-center justify-center">
+                    <Icon name="cog-6-tooth" size={24} class="text-white" />
+                  </div>
+                  <div class="flex-1 text-left">
+                    <h3 class="font-semibold text-gray-900">Settings</h3>
+                    <p class="text-sm text-gray-600">App preferences</p>
+                  </div>
+                  <Icon name="chevron-right" size={20} class="text-gray-400" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       </Show>
     </div>
   );

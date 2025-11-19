@@ -39,6 +39,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff2}'],
+        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024, // 3 MB to accommodate pdfmake
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -66,7 +67,7 @@ export default defineConfig({
       output: {
         manualChunks: {
           'editor': ['@tiptap/core', '@tiptap/starter-kit'],
-          'pdf': ['jspdf', 'html2canvas']
+          'pdf': ['pdfmake']
         }
       }
     }

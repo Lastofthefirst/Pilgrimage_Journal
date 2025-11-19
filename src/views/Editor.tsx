@@ -6,7 +6,6 @@ import { getCurrentDate, getEasyCreatedTime } from '../utils/date';
 import { debounce } from '../utils/debounce';
 import type { TextNote } from '../types';
 import toast from 'solid-toast';
-import Back from '../components/icons/Back';
 
 interface EditorProps {
   noteId?: string;
@@ -21,17 +20,21 @@ const Editor: Component<EditorProps> = (props) => {
   const [totalTypingTime, setTotalTypingTime] = createSignal(0);
   const [isTyping, setIsTyping] = createSignal(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = createSignal(false);
+  const [isSaving, setIsSaving] = createSignal(false);
+  const [lastSaved, setLastSaved] = createSignal<Date | null>(null);
+  const [showToolbar, setShowToolbar] = createSignal(true);
+  const [characterCount, setCharacterCount] = createSignal(0);
 
   let editorRef: HTMLDivElement | undefined;
   let typingStartTime: number | null = null;
   let typingIntervalId: number | null = null;
+  let scrollTimeout: number | null = null;
 
   // Generate UUID fallback
   const generateId = (): string => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
     }
-    // Fallback UUID v4 generator
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
       const r = (Math.random() * 16) | 0;
       const v = c === 'x' ? r : (r & 0x3) | 0x8;
@@ -50,13 +53,12 @@ const Editor: Component<EditorProps> = (props) => {
         if (editorRef) {
           editorRef.innerHTML = note.body;
         }
+        updateCharacterCount(note.body);
       }
     } else {
-      // Generate new ID for new note
       setNoteId(generateId());
     }
 
-    // Set placeholder if empty
     if (editorRef && !editorRef.innerHTML) {
       editorRef.innerHTML = '<p><br></p>';
     }
@@ -79,13 +81,19 @@ const Editor: Component<EditorProps> = (props) => {
     }
   };
 
-  // Auto-save with debounce
-  const saveNote = async () => {
-    // Only save if user has typed for 10+ seconds total
-    if (totalTypingTime() < 10000) {
-      return;
-    }
+  // Update character count
+  const updateCharacterCount = (html: string) => {
+    const temp = document.createElement('div');
+    temp.innerHTML = html;
+    const text = temp.textContent || temp.innerText || '';
+    setCharacterCount(text.length);
+  };
 
+  // Auto-save
+  const saveNote = async () => {
+    if (totalTypingTime() < 10000) return;
+
+    setIsSaving(true);
     const currentTitle = title() || 'Untitled Note';
     const currentSite = selectedSite() || sites[0].name;
     const currentBody = editorRef?.innerHTML || '';
@@ -102,7 +110,12 @@ const Editor: Component<EditorProps> = (props) => {
 
     await textNotesDB.add(note);
     setHasUnsavedChanges(false);
-    toast.success('Note saved');
+    setIsSaving(false);
+    setLastSaved(new Date());
+    toast.success('Note saved', {
+      duration: 2000,
+      position: 'bottom-center',
+    });
   };
 
   const debouncedSave = debounce(saveNote, 500);
@@ -110,20 +123,22 @@ const Editor: Component<EditorProps> = (props) => {
   // Handle content change
   const handleContentChange = () => {
     if (editorRef) {
-      setEditorContent(editorRef.innerHTML);
+      const content = editorRef.innerHTML;
+      setEditorContent(content);
+      updateCharacterCount(content);
       setHasUnsavedChanges(true);
       startTypingTimer();
       debouncedSave();
     }
   };
 
-  // Handle typing stopped (for timing)
+  // Handle typing stopped
   createEffect(() => {
     if (isTyping()) {
       if (typingIntervalId) clearTimeout(typingIntervalId);
       typingIntervalId = window.setTimeout(() => {
         stopTypingTimer();
-      }, 1000); // Stop counting after 1 second of inactivity
+      }, 1000);
     }
   });
 
@@ -131,6 +146,7 @@ const Editor: Component<EditorProps> = (props) => {
   onCleanup(() => {
     stopTypingTimer();
     if (typingIntervalId) clearTimeout(typingIntervalId);
+    if (scrollTimeout) clearTimeout(scrollTimeout);
   });
 
   // Format commands
@@ -144,6 +160,7 @@ const Editor: Component<EditorProps> = (props) => {
   const formatItalic = () => execCommand('italic');
   const formatUnderline = () => execCommand('underline');
   const formatH1 = () => execCommand('formatBlock', '<h1>');
+  const formatH2 = () => execCommand('formatBlock', '<h2>');
   const formatP = () => execCommand('formatBlock', '<p>');
   const formatBulletList = () => execCommand('insertUnorderedList');
   const formatOrderedList = () => execCommand('insertOrderedList');
@@ -156,12 +173,9 @@ const Editor: Component<EditorProps> = (props) => {
   // Save and go back
   const handleBack = async () => {
     stopTypingTimer();
-
-    // Save one final time if there are unsaved changes
     if (hasUnsavedChanges() || totalTypingTime() >= 10000) {
       await saveNote();
     }
-
     navigationStore.pop();
   };
 
@@ -180,19 +194,55 @@ const Editor: Component<EditorProps> = (props) => {
     });
   });
 
+  // Format last saved time
+  const getLastSavedText = () => {
+    const saved = lastSaved();
+    if (!saved) return '';
+
+    const now = new Date();
+    const diffMs = now.getTime() - saved.getTime();
+    const diffSecs = Math.floor(diffMs / 1000);
+    const diffMins = Math.floor(diffMs / 60000);
+
+    if (diffSecs < 10) return 'Just now';
+    if (diffSecs < 60) return `${diffSecs}s ago`;
+    if (diffMins < 60) return `${diffMins}m ago`;
+
+    return saved.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  };
+
   return (
-    <div class="flex flex-col h-screen bg-gray-50">
-      {/* Top Bar */}
-      <div class="bg-white border-b border-gray-200 shadow-sm">
-        <div class="px-4 py-3 flex items-center gap-3">
-          {/* Back Button */}
-          <button
-            onClick={handleBack}
-            class="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-            aria-label="Back"
-          >
-            <Back color="#1f2937" size={24} />
-          </button>
+    <div class="flex flex-col h-screen bg-gradient-to-br from-white via-blue-50/20 to-white">
+      {/* Modern Top Bar */}
+      <div class="bg-white/80 backdrop-blur-lg border-b border-gray-200/50 shadow-sm sticky top-0 z-20">
+        <div class="px-5 py-4">
+          {/* Back Button and Save Indicator */}
+          <div class="flex items-center justify-between mb-4">
+            <button
+              onClick={handleBack}
+              class="flex items-center gap-2 text-[#015D7C] hover:text-[#014A63] font-semibold transition-colors active-scale"
+            >
+              <span class="text-2xl">←</span>
+              <span>Back</span>
+            </button>
+
+            {/* Auto-save Indicator */}
+            <div class="flex items-center gap-3">
+              <div class={`flex items-center gap-2 text-sm ${isSaving() ? 'text-blue-600' : hasUnsavedChanges() ? 'text-orange-600' : 'text-green-600'}`}>
+                <span class={isSaving() ? 'animate-pulse' : ''}>
+                  {isSaving() ? '💾' : hasUnsavedChanges() ? '⏳' : '✓'}
+                </span>
+                <span class="font-medium">
+                  {isSaving() ? 'Saving...' : hasUnsavedChanges() ? 'Unsaved' : lastSaved() ? getLastSavedText() : 'Draft'}
+                </span>
+              </div>
+
+              {/* Character Count */}
+              <div class="text-sm text-gray-500 font-medium">
+                {characterCount()} chars
+              </div>
+            </div>
+          </div>
 
           {/* Title Input */}
           <input
@@ -205,120 +255,133 @@ const Editor: Component<EditorProps> = (props) => {
               startTypingTimer();
               debouncedSave();
             }}
-            class="flex-1 text-2xl font-bold text-gray-900 placeholder-gray-400 focus:outline-none"
+            class="w-full text-3xl font-bold text-gray-900 placeholder-gray-400 focus:outline-none bg-transparent mb-4"
+          />
+
+          {/* Site Selector - Beautiful Dropdown */}
+          <div class="relative">
+            <select
+              value={selectedSite()}
+              onChange={(e) => {
+                setSelectedSite(e.currentTarget.value);
+                setHasUnsavedChanges(true);
+                debouncedSave();
+              }}
+              class="w-full px-4 py-3 bg-gradient-to-r from-blue-50 to-blue-100/50 border-2 border-blue-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-[#015D7C] focus:border-transparent text-gray-900 font-semibold cursor-pointer transition-all hover:shadow-md"
+            >
+              <option value="">Select a sacred site...</option>
+              {sites.map((site) => (
+                <option value={site.name}>{site.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Floating Toolbar */}
+      <div class={`sticky top-0 z-10 transition-all duration-300 ${showToolbar() ? 'translate-y-0 opacity-100' : '-translate-y-full opacity-0'}`}>
+        <div class="bg-white/95 backdrop-blur-lg border-b border-gray-200/50 shadow-lg">
+          <div class="px-4 py-3 flex items-center gap-2 overflow-x-auto">
+            <button
+              onClick={formatBold}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg font-bold text-gray-700 transition-all active-scale min-w-[40px]"
+              title="Bold (Ctrl+B)"
+            >
+              B
+            </button>
+            <button
+              onClick={formatItalic}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg italic text-gray-700 transition-all active-scale min-w-[40px]"
+              title="Italic (Ctrl+I)"
+            >
+              I
+            </button>
+            <button
+              onClick={formatUnderline}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg underline text-gray-700 transition-all active-scale min-w-[40px]"
+              title="Underline (Ctrl+U)"
+            >
+              U
+            </button>
+
+            <div class="w-px h-6 bg-gray-300 mx-1" />
+
+            <button
+              onClick={formatH1}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg font-bold text-gray-700 transition-all active-scale"
+              title="Heading 1"
+            >
+              H1
+            </button>
+            <button
+              onClick={formatH2}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg font-semibold text-gray-700 transition-all active-scale"
+              title="Heading 2"
+            >
+              H2
+            </button>
+            <button
+              onClick={formatP}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg text-gray-700 transition-all active-scale"
+              title="Paragraph"
+            >
+              P
+            </button>
+
+            <div class="w-px h-6 bg-gray-300 mx-1" />
+
+            <button
+              onClick={formatBulletList}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg text-gray-700 transition-all active-scale text-xl"
+              title="Bullet List"
+            >
+              •
+            </button>
+            <button
+              onClick={formatOrderedList}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg text-gray-700 transition-all active-scale"
+              title="Numbered List"
+            >
+              1.
+            </button>
+            <button
+              onClick={formatBlockquote}
+              class="px-3 py-2 hover:bg-blue-100 rounded-lg text-gray-700 transition-all active-scale text-xl"
+              title="Quote"
+            >
+              "
+            </button>
+
+            <div class="w-px h-6 bg-gray-300 mx-1" />
+
+            <button
+              onClick={clearFormatting}
+              class="px-3 py-2 hover:bg-red-100 rounded-lg text-red-600 transition-all active-scale text-xl font-bold"
+              title="Clear Formatting"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Editor Area - Clean and Distraction-Free */}
+      <div class="flex-1 overflow-y-auto bg-white">
+        <div class="max-w-4xl mx-auto px-6 py-8">
+          <div
+            ref={editorRef}
+            contentEditable
+            onInput={handleContentChange}
+            onKeyDown={startTypingTimer}
+            onKeyUp={handleContentChange}
+            onPaste={handleContentChange}
+            class="min-h-[500px] focus:outline-none prose prose-lg max-w-none"
+            style={{
+              "min-height": "500px",
+            }}
+            data-placeholder="Begin your pilgrimage journey here... Share your thoughts, reflections, and sacred moments."
           />
         </div>
-
-        {/* Site Selector */}
-        <div class="px-4 pb-3">
-          <select
-            value={selectedSite()}
-            onChange={(e) => {
-              setSelectedSite(e.currentTarget.value);
-              setHasUnsavedChanges(true);
-              debouncedSave();
-            }}
-            class="w-full px-4 py-2 bg-gray-50 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-          >
-            <option value="">Select a site...</option>
-            {sites.map((site) => (
-              <option value={site.name}>{site.name}</option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      {/* Formatting Toolbar */}
-      <div class="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-1 overflow-x-auto">
-        <button
-          onClick={formatBold}
-          class="px-3 py-2 hover:bg-gray-100 rounded font-bold text-gray-700 transition-colors"
-          title="Bold"
-        >
-          B
-        </button>
-        <button
-          onClick={formatItalic}
-          class="px-3 py-2 hover:bg-gray-100 rounded italic text-gray-700 transition-colors"
-          title="Italic"
-        >
-          I
-        </button>
-        <button
-          onClick={formatUnderline}
-          class="px-3 py-2 hover:bg-gray-100 rounded underline text-gray-700 transition-colors"
-          title="Underline"
-        >
-          U
-        </button>
-
-        <div class="w-px h-6 bg-gray-300 mx-1" />
-
-        <button
-          onClick={formatH1}
-          class="px-3 py-2 hover:bg-gray-100 rounded font-bold text-gray-700 transition-colors"
-          title="Heading 1"
-        >
-          H1
-        </button>
-        <button
-          onClick={formatP}
-          class="px-3 py-2 hover:bg-gray-100 rounded text-gray-700 transition-colors"
-          title="Paragraph"
-        >
-          P
-        </button>
-
-        <div class="w-px h-6 bg-gray-300 mx-1" />
-
-        <button
-          onClick={formatBulletList}
-          class="px-3 py-2 hover:bg-gray-100 rounded text-gray-700 transition-colors"
-          title="Bullet List"
-        >
-          •
-        </button>
-        <button
-          onClick={formatOrderedList}
-          class="px-3 py-2 hover:bg-gray-100 rounded text-gray-700 transition-colors"
-          title="Ordered List"
-        >
-          1.
-        </button>
-        <button
-          onClick={formatBlockquote}
-          class="px-3 py-2 hover:bg-gray-100 rounded text-gray-700 transition-colors"
-          title="Blockquote"
-        >
-          "
-        </button>
-
-        <div class="w-px h-6 bg-gray-300 mx-1" />
-
-        <button
-          onClick={clearFormatting}
-          class="px-3 py-2 hover:bg-gray-100 rounded text-gray-700 transition-colors"
-          title="Clear Formatting"
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Editor Area */}
-      <div class="flex-1 overflow-y-auto bg-white">
-        <div
-          ref={editorRef}
-          contentEditable
-          onInput={handleContentChange}
-          onKeyDown={startTypingTimer}
-          onKeyUp={handleContentChange}
-          onPaste={handleContentChange}
-          class="min-h-full px-4 py-6 focus:outline-none prose max-w-none"
-          style={{
-            "min-height": "100%",
-          }}
-          data-placeholder="Write your pilgrimage notes here..."
-        />
       </div>
 
       <style>{`
@@ -326,7 +389,7 @@ const Editor: Component<EditorProps> = (props) => {
           content: attr(data-placeholder);
           color: #9ca3af;
           pointer-events: none;
-          position: absolute;
+          font-style: italic;
         }
 
         [contenteditable] {
@@ -334,26 +397,42 @@ const Editor: Component<EditorProps> = (props) => {
         }
 
         [contenteditable] h1 {
-          font-size: 2em;
-          font-weight: bold;
+          font-size: 2.5em;
+          font-weight: 800;
           margin: 0.67em 0;
+          font-family: 'Playfair Display', Georgia, serif;
+          color: #1F2937;
+        }
+
+        [contenteditable] h2 {
+          font-size: 2em;
+          font-weight: 700;
+          margin: 0.75em 0;
+          font-family: 'Playfair Display', Georgia, serif;
+          color: #1F2937;
         }
 
         [contenteditable] p {
-          margin: 1em 0;
+          margin: 1.25em 0;
+          line-height: 1.75;
+          color: #374151;
         }
 
         [contenteditable] blockquote {
-          border-left: 4px solid #e5e7eb;
-          padding-left: 1em;
-          margin: 1em 0;
+          border-left: 4px solid #015D7C;
+          padding-left: 1.5em;
+          margin: 1.5em 0;
           color: #6b7280;
+          font-style: italic;
+          background: #F0F9FE;
+          padding: 1em 1.5em;
+          border-radius: 0 8px 8px 0;
         }
 
         [contenteditable] ul,
         [contenteditable] ol {
-          margin: 1em 0;
-          padding-left: 2em;
+          margin: 1.5em 0;
+          padding-left: 2.5em;
         }
 
         [contenteditable] ul {
@@ -364,9 +443,15 @@ const Editor: Component<EditorProps> = (props) => {
           list-style-type: decimal;
         }
 
+        [contenteditable] li {
+          margin: 0.5em 0;
+          line-height: 1.75;
+        }
+
         [contenteditable] strong,
         [contenteditable] b {
-          font-weight: bold;
+          font-weight: 700;
+          color: #1F2937;
         }
 
         [contenteditable] em,
@@ -378,7 +463,6 @@ const Editor: Component<EditorProps> = (props) => {
           text-decoration: underline;
         }
 
-        /* Focus state */
         [contenteditable]:focus {
           outline: none;
         }
