@@ -65,14 +65,10 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor': ['solid-js'],
           'editor': ['@tiptap/core', '@tiptap/starter-kit'],
           'pdf': ['jspdf', 'html2canvas']
         }
       }
     }
-  },
-  optimizeDeps: {
-    exclude: ['solid-js']
   }
 });

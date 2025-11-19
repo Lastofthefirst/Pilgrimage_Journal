@@ -1,16 +1,44 @@
+# Dependencies
 node_modules/
-.expo/
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Build output
 dist/
-npm-debug.*
-*.jks
-*.p8
-*.p12
-*.key
-*.mobileprovision
-*.orig.*
-web-build/
+build/
 
-# macOS
+# Environment
+.env
+.env.local
+.env.production
+.env.development
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
 .DS_Store
+Thumbs.db
 
-Notes.md
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Testing
+coverage/
+
+# PWA generated files
+sw.js
+workbox-*.js
+
+# Temporary
+*.tmp
+.cache/
