@@ -2,7 +2,7 @@ import { createSignal, onMount, Show, For } from 'solid-js';
 import { navigationStore } from '../stores/navigationStore';
 import { textNotesDB, audioNotesDB, imageNotesDB, mediaBlobsDB, blobToDataURL } from '../lib/db';
 import { sites } from '../data/sites';
-import type { TextNote, AudioNote, ImageNote } from '../types';
+import type { TextNote, AudioNote, ImageNote, Site } from '../types';
 import {
   stripHtml,
   groupNotesBySite,
@@ -10,8 +10,12 @@ import {
   getDateRange,
   formatTimestamp,
 } from '../utils/pdfHelpers';
-import jsPDF from 'jspdf';
+import pdfMake from 'pdfmake/build/pdfmake';
+import pdfFonts from 'pdfmake/build/vfs_fonts';
 import toast from 'solid-toast';
+
+// Register fonts
+pdfMake.vfs = pdfFonts.pdfMake.vfs;
 
 interface AllData {
   textNotes: TextNote[];
@@ -23,9 +27,8 @@ interface AllData {
 interface ExportOptions {
   includeSiteInfo: boolean;
   includeImages: boolean;
-  includeAudioTranscripts: boolean;
-  includeTableOfContents: boolean;
   includeTimestamps: boolean;
+  orientation: 'portrait' | 'landscape';
 }
 
 const Print = () => {
@@ -43,9 +46,8 @@ const Print = () => {
   const [exportOptions, setExportOptions] = createSignal<ExportOptions>({
     includeSiteInfo: true,
     includeImages: false, // Default to false due to file size
-    includeAudioTranscripts: false,
-    includeTableOfContents: true,
     includeTimestamps: true,
+    orientation: 'portrait',
   });
 
   // Load all data on mount
@@ -87,10 +89,17 @@ const Print = () => {
   };
 
   const toggleOption = (option: keyof ExportOptions) => {
-    setExportOptions({
-      ...exportOptions(),
-      [option]: !exportOptions()[option],
-    });
+    if (option === 'orientation') {
+      setExportOptions({
+        ...exportOptions(),
+        orientation: exportOptions().orientation === 'portrait' ? 'landscape' : 'portrait',
+      });
+    } else {
+      setExportOptions({
+        ...exportOptions(),
+        [option]: !exportOptions()[option],
+      });
+    }
   };
 
   const generatePDF = async () => {
@@ -99,68 +108,6 @@ const Print = () => {
     try {
       const data = allData();
       const options = exportOptions();
-      const doc = new jsPDF();
-
-      // PDF settings
-      const pageWidth = doc.internal.pageSize.getWidth();
-      const pageHeight = doc.internal.pageSize.getHeight();
-      const margin = 20;
-      const contentWidth = pageWidth - 2 * margin;
-      let currentY = margin;
-      let currentPage = 1;
-
-      // Helper function to add a new page
-      const addNewPage = () => {
-        doc.addPage();
-        currentPage++;
-        currentY = margin;
-      };
-
-      // Helper function to check if we need a new page
-      const checkNewPage = (neededSpace: number) => {
-        if (currentY + neededSpace > pageHeight - margin) {
-          addNewPage();
-        }
-      };
-
-      // Helper function to add footer
-      const addFooter = () => {
-        const footerY = pageHeight - 10;
-        doc.setFontSize(8);
-        doc.setTextColor(128, 128, 128);
-        doc.text('Pilgrim Notes', margin, footerY);
-        doc.text(`Page ${currentPage}`, pageWidth - margin, footerY, {
-          align: 'right',
-        });
-        doc.setTextColor(0, 0, 0);
-      };
-
-      // COVER PAGE
-      doc.setFontSize(32);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Pilgrimage Journal', pageWidth / 2, 100, { align: 'center' });
-
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'italic');
-      doc.text('A Spiritual Journey', pageWidth / 2, 120, { align: 'center' });
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text(dateRange(), pageWidth / 2, 140, { align: 'center' });
-
-      doc.setFontSize(10);
-      doc.setTextColor(128, 128, 128);
-      const generatedDate = new Intl.DateTimeFormat('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric',
-      }).format(new Date());
-      doc.text(`Generated: ${generatedDate}`, pageWidth / 2, 160, {
-        align: 'center',
-      });
-      doc.setTextColor(0, 0, 0);
-
-      addFooter();
 
       // Group notes by site
       const groupedData = groupNotesBySite(
@@ -170,271 +117,396 @@ const Print = () => {
         sites
       );
 
-      // Store page numbers for table of contents
-      const tocEntries: { title: string; page: number }[] = [];
+      // Build table of contents
+      const tocItems: any[] = [];
+      groupedData.forEach((group, index) => {
+        tocItems.push({
+          text: group.site.name,
+          style: 'tocItem',
+          tocItem: true,
+        });
+      });
 
-      // TABLE OF CONTENTS (if enabled)
-      if (options.includeTableOfContents && groupedData.length > 0) {
-        addNewPage();
-        currentY = margin;
+      // Build site sections
+      const siteSections: any[] = [];
 
-        doc.setFontSize(18);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Table of Contents', margin, currentY);
-        currentY += 15;
-
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-
-        // We'll update this after generating all pages
-        // For now, just reserve space
-        const tocStartPage = currentPage;
-
-        addFooter();
-      }
-
-      // CONTENT - For each site
       for (const group of groupedData) {
-        addNewPage();
-        currentY = margin;
-
-        // Record TOC entry
-        tocEntries.push({ title: group.site.name, page: currentPage });
+        const siteContent: any[] = [];
 
         // Site Header
-        doc.setFontSize(18);
-        doc.setFont('helvetica', 'bold');
-        doc.text(group.site.name, margin, currentY);
-        currentY += 10;
+        siteContent.push({
+          text: group.site.name,
+          style: 'siteHeader',
+          pageBreak: siteSections.length > 0 ? 'before' : undefined,
+          tocItem: group.site.name,
+        });
 
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'italic');
-        doc.text(group.site.city, margin, currentY);
-        currentY += 12;
+        siteContent.push({
+          text: group.site.city,
+          style: 'siteCity',
+          margin: [0, 0, 0, 10],
+        });
 
         // Site Info (if enabled)
         if (options.includeSiteInfo) {
           // Quote
-          doc.setFontSize(10);
-          doc.setFont('helvetica', 'italic');
-          doc.setTextColor(64, 64, 64);
-
-          const quoteLines = doc.splitTextToSize(group.site.quote, contentWidth - 10);
-          for (const line of quoteLines) {
-            checkNewPage(7);
-            doc.text(line, margin + 5, currentY);
-            currentY += 7;
-          }
+          siteContent.push({
+            text: group.site.quote,
+            style: 'quote',
+          });
 
           // Reference
           if (group.site.reference) {
-            checkNewPage(7);
-            doc.setFont('helvetica', 'normal');
-            doc.setFontSize(9);
-            const refLines = doc.splitTextToSize(
-              `— ${group.site.reference}`,
-              contentWidth - 10
-            );
-            for (const line of refLines) {
-              checkNewPage(6);
-              doc.text(line, margin + 5, currentY);
-              currentY += 6;
-            }
+            siteContent.push({
+              text: `— ${group.site.reference}`,
+              style: 'reference',
+            });
           }
-
-          doc.setTextColor(0, 0, 0);
-          currentY += 8;
 
           // Address
           if (group.site.address) {
-            checkNewPage(15);
-            doc.setFontSize(9);
-            doc.setFont('helvetica', 'bold');
-            doc.text('Address:', margin, currentY);
-            currentY += 6;
-
-            doc.setFont('helvetica', 'normal');
-            const addrLines = doc.splitTextToSize(group.site.address, contentWidth);
-            for (const line of addrLines) {
-              checkNewPage(5);
-              doc.text(line, margin, currentY);
-              currentY += 5;
-            }
-            currentY += 8;
+            siteContent.push({
+              text: 'Address:',
+              style: 'subheading',
+              margin: [0, 10, 0, 3],
+            });
+            siteContent.push({
+              text: group.site.address,
+              style: 'address',
+              margin: [0, 0, 0, 10],
+            });
           }
         }
 
         // TEXT NOTES
         if (group.textNotes.length > 0) {
-          checkNewPage(15);
-          doc.setFontSize(12);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Text Notes', margin, currentY);
-          currentY += 8;
+          siteContent.push({
+            text: 'Text Notes',
+            style: 'sectionHeader',
+            margin: [0, 10, 0, 8],
+          });
 
           for (const note of group.textNotes) {
-            checkNewPage(20);
+            const noteContent: any[] = [];
 
             // Note title
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(note.title, margin + 3, currentY);
-            currentY += 7;
+            noteContent.push({
+              text: note.title,
+              style: 'noteTitle',
+            });
 
             // Timestamp (if enabled)
             if (options.includeTimestamps) {
-              doc.setFontSize(8);
-              doc.setFont('helvetica', 'italic');
-              doc.setTextColor(128, 128, 128);
-              doc.text(formatTimestamp(note.created), margin + 3, currentY);
-              doc.setTextColor(0, 0, 0);
-              currentY += 7;
+              noteContent.push({
+                text: formatTimestamp(note.created),
+                style: 'timestamp',
+              });
             }
 
             // Note content (convert HTML to plain text)
-            doc.setFontSize(10);
-            doc.setFont('helvetica', 'normal');
             const noteText = stripHtml(note.body);
-            const noteLines = doc.splitTextToSize(noteText, contentWidth - 6);
+            noteContent.push({
+              text: noteText,
+              style: 'noteBody',
+              margin: [0, 3, 0, 10],
+            });
 
-            for (const line of noteLines) {
-              checkNewPage(6);
-              doc.text(line, margin + 3, currentY);
-              currentY += 6;
-            }
-
-            currentY += 8;
+            siteContent.push({
+              stack: noteContent,
+              margin: [5, 0, 0, 8],
+            });
           }
         }
 
         // IMAGE NOTES
         if (group.imageNotes.length > 0) {
-          checkNewPage(15);
-          doc.setFontSize(12);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Photos', margin, currentY);
-          currentY += 8;
+          siteContent.push({
+            text: 'Photos',
+            style: 'sectionHeader',
+            margin: [0, 10, 0, 8],
+          });
 
           for (const note of group.imageNotes) {
-            checkNewPage(30);
+            const imageNoteContent: any[] = [];
 
             // Note title
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(note.title, margin + 3, currentY);
-            currentY += 7;
+            imageNoteContent.push({
+              text: note.title,
+              style: 'noteTitle',
+            });
 
             // Timestamp (if enabled)
             if (options.includeTimestamps) {
-              doc.setFontSize(8);
-              doc.setFont('helvetica', 'italic');
-              doc.setTextColor(128, 128, 128);
-              doc.text(formatTimestamp(note.created), margin + 3, currentY);
-              doc.setTextColor(0, 0, 0);
-              currentY += 7;
+              imageNoteContent.push({
+                text: formatTimestamp(note.created),
+                style: 'timestamp',
+              });
             }
 
             // Image (if enabled)
             if (options.includeImages && data.imageBlobs[note.id]) {
-              checkNewPage(80);
               try {
-                const imgData = data.imageBlobs[note.id];
-                const imgWidth = contentWidth - 6;
-                const imgHeight = 60; // Fixed height, could be calculated based on aspect ratio
-                doc.addImage(imgData, 'JPEG', margin + 3, currentY, imgWidth, imgHeight);
-                currentY += imgHeight + 5;
+                imageNoteContent.push({
+                  image: data.imageBlobs[note.id],
+                  width: options.orientation === 'portrait' ? 400 : 600,
+                  margin: [0, 5, 0, 10],
+                });
               } catch (error) {
                 console.error('Error adding image to PDF:', error);
-                doc.setFontSize(9);
-                doc.setTextColor(128, 128, 128);
-                doc.text('[Image could not be loaded]', margin + 3, currentY);
-                doc.setTextColor(0, 0, 0);
-                currentY += 7;
+                imageNoteContent.push({
+                  text: '[Image could not be loaded]',
+                  style: 'error',
+                });
               }
             }
 
-            currentY += 8;
+            siteContent.push({
+              stack: imageNoteContent,
+              margin: [5, 0, 0, 10],
+            });
           }
         }
 
         // AUDIO NOTES
         if (group.audioNotes.length > 0) {
-          checkNewPage(15);
-          doc.setFontSize(12);
-          doc.setFont('helvetica', 'bold');
-          doc.text('Audio Notes', margin, currentY);
-          currentY += 8;
+          siteContent.push({
+            text: 'Audio Notes',
+            style: 'sectionHeader',
+            margin: [0, 10, 0, 8],
+          });
 
           for (const note of group.audioNotes) {
-            checkNewPage(15);
+            const audioNoteContent: any[] = [];
 
             // Note title
-            doc.setFontSize(11);
-            doc.setFont('helvetica', 'bold');
-            doc.text(note.title, margin + 3, currentY);
-            currentY += 7;
+            audioNoteContent.push({
+              text: note.title,
+              style: 'noteTitle',
+            });
 
             // Timestamp (if enabled)
             if (options.includeTimestamps) {
-              doc.setFontSize(8);
-              doc.setFont('helvetica', 'italic');
-              doc.setTextColor(128, 128, 128);
-              doc.text(formatTimestamp(note.created), margin + 3, currentY);
-              doc.setTextColor(0, 0, 0);
-              currentY += 7;
+              audioNoteContent.push({
+                text: formatTimestamp(note.created),
+                style: 'timestamp',
+              });
             }
 
             // Audio info
-            doc.setFontSize(9);
-            doc.setTextColor(64, 64, 64);
-            doc.text('[Audio Recording - Not playable in PDF]', margin + 3, currentY);
-            doc.setTextColor(0, 0, 0);
-            currentY += 10;
+            audioNoteContent.push({
+              text: '[Audio Recording - Not playable in PDF]',
+              style: 'audioNote',
+              margin: [0, 3, 0, 10],
+            });
+
+            siteContent.push({
+              stack: audioNoteContent,
+              margin: [5, 0, 0, 8],
+            });
           }
         }
 
-        addFooter();
+        siteSections.push(...siteContent);
       }
 
-      // Update Table of Contents with actual page numbers
-      if (options.includeTableOfContents && tocEntries.length > 0) {
-        // Go back to TOC page
-        const tocPage = 2; // Usually page 2 after cover
-        doc.setPage(tocPage);
-        currentY = margin + 15;
+      // Document definition
+      const docDefinition: any = {
+        pageSize: 'A4',
+        pageOrientation: options.orientation,
+        pageMargins: [40, 60, 40, 60],
 
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
+        content: [
+          // Cover page
+          {
+            stack: [
+              {
+                text: 'My Pilgrimage Journal',
+                style: 'coverTitle',
+                margin: [0, 100, 0, 20],
+              },
+              {
+                text: 'A Spiritual Journey to the Holy Land',
+                style: 'coverSubtitle',
+                margin: [0, 0, 0, 20],
+              },
+              {
+                text: dateRange(),
+                style: 'coverDate',
+              },
+              {
+                text: `Generated: ${new Date().toLocaleDateString('en-US', {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}`,
+                style: 'generatedDate',
+                margin: [0, 20, 0, 0],
+              },
+            ],
+            margin: [0, 0, 0, 0],
+          },
+          {
+            text: '',
+            pageBreak: 'after',
+          },
 
-        for (const entry of tocEntries) {
-          checkNewPage(8);
-          doc.text(entry.title, margin, currentY);
-          doc.text(String(entry.page), pageWidth - margin, currentY, {
-            align: 'right',
-          });
+          // Table of contents
+          {
+            text: 'Table of Contents',
+            style: 'tocHeader',
+            margin: [0, 0, 0, 20],
+          },
+          {
+            toc: {
+              title: { text: '' },
+            },
+            margin: [0, 0, 0, 20],
+          },
+          {
+            text: '',
+            pageBreak: 'after',
+          },
 
-          // Draw dotted line
-          const titleWidth = doc.getTextWidth(entry.title);
-          const pageNumWidth = doc.getTextWidth(String(entry.page));
-          const dotsStart = margin + titleWidth + 2;
-          const dotsEnd = pageWidth - margin - pageNumWidth - 2;
+          // Site sections
+          ...siteSections,
+        ],
 
-          doc.setLineDash([1, 2]);
-          doc.line(dotsStart, currentY - 1, dotsEnd, currentY - 1);
-          doc.setLineDash([]);
+        styles: {
+          coverTitle: {
+            fontSize: 32,
+            bold: true,
+            alignment: 'center',
+            color: '#015D7C',
+          },
+          coverSubtitle: {
+            fontSize: 18,
+            italics: true,
+            alignment: 'center',
+            color: '#666666',
+          },
+          coverDate: {
+            fontSize: 14,
+            alignment: 'center',
+            color: '#333333',
+          },
+          generatedDate: {
+            fontSize: 10,
+            alignment: 'center',
+            color: '#999999',
+          },
+          tocHeader: {
+            fontSize: 24,
+            bold: true,
+            color: '#015D7C',
+          },
+          tocItem: {
+            fontSize: 12,
+            margin: [0, 3, 0, 3],
+          },
+          siteHeader: {
+            fontSize: 20,
+            bold: true,
+            color: '#015D7C',
+            margin: [0, 0, 0, 5],
+          },
+          siteCity: {
+            fontSize: 14,
+            italics: true,
+            color: '#666666',
+          },
+          quote: {
+            fontSize: 11,
+            italics: true,
+            color: '#444444',
+            margin: [20, 10, 20, 5],
+          },
+          reference: {
+            fontSize: 10,
+            italics: true,
+            color: '#666666',
+            margin: [20, 0, 20, 10],
+          },
+          subheading: {
+            fontSize: 11,
+            bold: true,
+            color: '#333333',
+          },
+          address: {
+            fontSize: 10,
+            color: '#666666',
+          },
+          sectionHeader: {
+            fontSize: 14,
+            bold: true,
+            color: '#015D7C',
+          },
+          noteTitle: {
+            fontSize: 12,
+            bold: true,
+            color: '#333333',
+            margin: [0, 0, 0, 3],
+          },
+          timestamp: {
+            fontSize: 9,
+            italics: true,
+            color: '#999999',
+            margin: [0, 0, 0, 3],
+          },
+          noteBody: {
+            fontSize: 10,
+            color: '#333333',
+            lineHeight: 1.3,
+          },
+          audioNote: {
+            fontSize: 9,
+            italics: true,
+            color: '#666666',
+          },
+          error: {
+            fontSize: 9,
+            color: '#999999',
+            italics: true,
+          },
+        },
 
-          currentY += 8;
-        }
-      }
+        defaultStyle: {
+          font: 'Helvetica',
+        },
 
-      // Convert to Blob
-      const pdfBlob = doc.output('blob');
-      setGeneratedPDF(pdfBlob);
-      toast.success('PDF generated successfully!');
+        // Footer
+        footer: (currentPage: number, pageCount: number) => {
+          return {
+            columns: [
+              {
+                text: 'Pilgrim Notes',
+                alignment: 'left',
+                fontSize: 8,
+                color: '#999999',
+                margin: [40, 0, 0, 0],
+              },
+              {
+                text: `Page ${currentPage} of ${pageCount}`,
+                alignment: 'right',
+                fontSize: 8,
+                color: '#999999',
+                margin: [0, 0, 40, 0],
+              },
+            ],
+          };
+        },
+      };
+
+      // Generate PDF
+      const pdfDocGenerator = pdfMake.createPdf(docDefinition);
+
+      pdfDocGenerator.getBlob((blob: Blob) => {
+        setGeneratedPDF(blob);
+        setGenerating(false);
+        toast.success('PDF generated successfully!');
+      });
     } catch (error) {
       console.error('Error generating PDF:', error);
       toast.error('Failed to generate PDF');
-    } finally {
       setGenerating(false);
     }
   };
@@ -511,9 +583,9 @@ const Print = () => {
   };
 
   return (
-    <div class="flex flex-col h-screen bg-gray-50">
+    <div class="flex flex-col h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Top Bar */}
-      <div class="bg-white border-b border-gray-200 px-4 py-3 shadow-sm">
+      <div class="bg-white/80 backdrop-blur-sm border-b border-gray-200 px-4 py-3 shadow-sm">
         <button
           onClick={handleBack}
           class="flex items-center gap-2 text-blue-600 hover:text-blue-700 active:text-blue-800 font-medium mb-2"
@@ -521,7 +593,7 @@ const Print = () => {
           <span class="text-xl">←</span>
           <span>Back</span>
         </button>
-        <h1 class="text-2xl font-bold text-gray-900">Export Journal</h1>
+        <h1 class="text-2xl font-bold text-gray-900">Export Your Pilgrimage Journal</h1>
       </div>
 
       {/* Content Section */}
@@ -530,188 +602,202 @@ const Print = () => {
           when={!loading()}
           fallback={
             <div class="flex items-center justify-center h-full">
-              <div class="text-gray-500">Loading...</div>
+              <div class="flex flex-col items-center gap-3">
+                <div class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                <div class="text-gray-600 font-medium">Loading your journey...</div>
+              </div>
             </div>
           }
         >
-          {/* Export Preview */}
-          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-4">
-            <div class="flex items-start gap-4 mb-4">
-              <div class="text-4xl">🖨️</div>
+          {/* Statistics Cards */}
+          <div class="grid grid-cols-2 gap-3 mb-6">
+            <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-5 text-white">
+              <div class="text-3xl mb-2">🕌</div>
+              <div class="text-3xl font-bold mb-1">{stats().totalSites}</div>
+              <div class="text-sm opacity-90">Sites Visited</div>
+            </div>
+            <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-5 text-white">
+              <div class="text-3xl mb-2">📝</div>
+              <div class="text-3xl font-bold mb-1">{stats().totalTextNotes}</div>
+              <div class="text-sm opacity-90">Text Notes</div>
+            </div>
+            <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-5 text-white">
+              <div class="text-3xl mb-2">📷</div>
+              <div class="text-3xl font-bold mb-1">{stats().totalImageNotes}</div>
+              <div class="text-sm opacity-90">Photos</div>
+            </div>
+            <div class="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-5 text-white">
+              <div class="text-3xl mb-2">🎤</div>
+              <div class="text-3xl font-bold mb-1">{stats().totalAudioNotes}</div>
+              <div class="text-sm opacity-90">Audio Recordings</div>
+            </div>
+          </div>
+
+          {/* PDF Preview Card */}
+          <div class="bg-white rounded-xl shadow-md border border-gray-200 p-6 mb-6">
+            <div class="flex items-start gap-4">
+              <div class="text-5xl">📖</div>
               <div class="flex-1">
                 <h2 class="text-xl font-bold text-gray-900 mb-2">
-                  Pilgrimage Journal
+                  Professional PDF Journal
                 </h2>
-                <p class="text-gray-600 mb-4">
-                  Generate a complete PDF journal with all your notes, photos, and
-                  reflections
+                <p class="text-gray-600 mb-3">
+                  Your complete pilgrimage experience beautifully formatted with cover page,
+                  table of contents, and all your memories organized by sacred site.
                 </p>
-
-                {/* Statistics */}
-                <div class="grid grid-cols-2 gap-3">
-                  <div class="bg-blue-50 rounded-lg p-3">
-                    <div class="text-2xl font-bold text-blue-600">
-                      {stats().totalSites}
-                    </div>
-                    <div class="text-sm text-gray-600">Sites Visited</div>
-                  </div>
-                  <div class="bg-green-50 rounded-lg p-3">
-                    <div class="text-2xl font-bold text-green-600">
-                      {stats().totalTextNotes}
-                    </div>
-                    <div class="text-sm text-gray-600">Text Notes</div>
-                  </div>
-                  <div class="bg-purple-50 rounded-lg p-3">
-                    <div class="text-2xl font-bold text-purple-600">
-                      {stats().totalImageNotes}
-                    </div>
-                    <div class="text-sm text-gray-600">Photos</div>
-                  </div>
-                  <div class="bg-orange-50 rounded-lg p-3">
-                    <div class="text-2xl font-bold text-orange-600">
-                      {stats().totalAudioNotes}
-                    </div>
-                    <div class="text-sm text-gray-600">Audio Recordings</div>
-                  </div>
+                <div class="flex flex-wrap gap-2 text-sm">
+                  <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full">Cover Page</span>
+                  <span class="px-3 py-1 bg-purple-100 text-purple-700 rounded-full">Table of Contents</span>
+                  <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full">Professional Layout</span>
+                  <span class="px-3 py-1 bg-orange-100 text-orange-700 rounded-full">Page Numbers</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Export Options */}
-          <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-4">
-            <h3 class="text-lg font-semibold text-gray-900 mb-4">
-              Export Options
+          <div class="bg-white rounded-xl shadow-md border border-gray-200 p-6 mb-6">
+            <h3 class="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <span>⚙️</span>
+              <span>Export Options</span>
             </h3>
-            <div class="space-y-3">
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={exportOptions().includeSiteInfo}
-                  onChange={() => toggleOption('includeSiteInfo')}
-                  class="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
-                />
+            <div class="space-y-4">
+              <label class="flex items-start gap-3 cursor-pointer group">
+                <div class="relative">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions().includeSiteInfo}
+                    onChange={() => toggleOption('includeSiteInfo')}
+                    class="w-5 h-5 text-blue-600 rounded border-2 border-gray-300 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  />
+                </div>
                 <div class="flex-1">
-                  <div class="font-medium text-gray-900">
+                  <div class="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
                     Include site information and quotes
                   </div>
-                  <div class="text-sm text-gray-600">
-                    Adds site descriptions, quotes, and addresses
+                  <div class="text-sm text-gray-600 mt-1">
+                    Adds site descriptions, biblical quotes, and addresses to enhance context
                   </div>
                 </div>
               </label>
 
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={exportOptions().includeImages}
-                  onChange={() => toggleOption('includeImages')}
-                  class="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
-                />
+              <label class="flex items-start gap-3 cursor-pointer group">
+                <div class="relative">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions().includeImages}
+                    onChange={() => toggleOption('includeImages')}
+                    class="w-5 h-5 text-blue-600 rounded border-2 border-gray-300 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  />
+                </div>
                 <div class="flex-1">
-                  <div class="font-medium text-gray-900">Include images</div>
-                  <div class="text-sm text-gray-600">
-                    Note: This will significantly increase file size
+                  <div class="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                    Include images
+                  </div>
+                  <div class="text-sm text-gray-600 mt-1">
+                    <span class="text-orange-600 font-medium">Note:</span> This will significantly increase file size
                   </div>
                 </div>
               </label>
 
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={exportOptions().includeAudioTranscripts}
-                  onChange={() => toggleOption('includeAudioTranscripts')}
-                  class="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
-                />
+              <label class="flex items-start gap-3 cursor-pointer group">
+                <div class="relative">
+                  <input
+                    type="checkbox"
+                    checked={exportOptions().includeTimestamps}
+                    onChange={() => toggleOption('includeTimestamps')}
+                    class="w-5 h-5 text-blue-600 rounded border-2 border-gray-300 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                  />
+                </div>
                 <div class="flex-1">
-                  <div class="font-medium text-gray-900">
-                    Include audio transcripts
+                  <div class="font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                    Include timestamps
                   </div>
-                  <div class="text-sm text-gray-600">
-                    If available (not yet implemented)
+                  <div class="text-sm text-gray-600 mt-1">
+                    Shows when each note was created during your pilgrimage
                   </div>
                 </div>
               </label>
 
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={exportOptions().includeTableOfContents}
-                  onChange={() => toggleOption('includeTableOfContents')}
-                  class="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
-                />
-                <div class="flex-1">
-                  <div class="font-medium text-gray-900">
-                    Include table of contents
-                  </div>
-                  <div class="text-sm text-gray-600">
-                    Lists all sites with page numbers
-                  </div>
+              {/* Orientation Toggle */}
+              <div class="pt-4 border-t border-gray-200">
+                <div class="font-semibold text-gray-900 mb-3">Page Orientation</div>
+                <div class="flex gap-3">
+                  <button
+                    onClick={() => setExportOptions({ ...exportOptions(), orientation: 'portrait' })}
+                    class={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
+                      exportOptions().orientation === 'portrait'
+                        ? 'bg-blue-600 text-white shadow-lg scale-105'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <div class="text-2xl mb-1">📄</div>
+                    <div>Portrait</div>
+                  </button>
+                  <button
+                    onClick={() => setExportOptions({ ...exportOptions(), orientation: 'landscape' })}
+                    class={`flex-1 py-3 px-4 rounded-lg font-medium transition-all ${
+                      exportOptions().orientation === 'landscape'
+                        ? 'bg-blue-600 text-white shadow-lg scale-105'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <div class="text-2xl mb-1">📃</div>
+                    <div>Landscape</div>
+                  </button>
                 </div>
-              </label>
-
-              <label class="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={exportOptions().includeTimestamps}
-                  onChange={() => toggleOption('includeTimestamps')}
-                  class="mt-1 w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-2 focus:ring-blue-500"
-                />
-                <div class="flex-1">
-                  <div class="font-medium text-gray-900">Include timestamps</div>
-                  <div class="text-sm text-gray-600">
-                    Shows when each note was created
-                  </div>
-                </div>
-              </label>
+              </div>
             </div>
           </div>
 
-          {/* Generation Button */}
+          {/* Generation Button or Success Card */}
           <Show
             when={!generatedPDF()}
             fallback={
-              <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-                <div class="text-center mb-4">
-                  <div class="text-4xl mb-3">✅</div>
-                  <h3 class="text-lg font-semibold text-gray-900 mb-2">
+              <div class="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl shadow-lg border-2 border-green-200 p-6">
+                <div class="text-center mb-6">
+                  <div class="text-6xl mb-4">✅</div>
+                  <h3 class="text-2xl font-bold text-gray-900 mb-2">
                     PDF Generated Successfully!
                   </h3>
-                  <p class="text-gray-600 mb-4">
+                  <p class="text-gray-600 mb-1">
                     Your pilgrimage journal is ready to download, share, or print
+                  </p>
+                  <p class="text-sm text-gray-500">
+                    {stats().totalNotes} notes from {stats().totalSites} sacred sites
                   </p>
                 </div>
 
                 <div class="space-y-3">
                   <button
                     onClick={handleDownload}
-                    class="w-full py-3 px-4 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 active:bg-blue-800 transition-colors flex items-center justify-center gap-2"
+                    class="w-full py-4 px-6 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-xl font-bold text-lg hover:from-blue-700 hover:to-blue-800 active:scale-98 transition-all shadow-lg flex items-center justify-center gap-3"
                   >
-                    <span>📥</span>
+                    <span class="text-2xl">📥</span>
                     <span>Download PDF</span>
                   </button>
 
                   <button
                     onClick={handleShare}
-                    class="w-full py-3 px-4 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 active:bg-green-800 transition-colors flex items-center justify-center gap-2"
+                    class="w-full py-4 px-6 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-xl font-bold text-lg hover:from-green-700 hover:to-green-800 active:scale-98 transition-all shadow-lg flex items-center justify-center gap-3"
                   >
-                    <span>📤</span>
+                    <span class="text-2xl">📤</span>
                     <span>Share PDF</span>
                   </button>
 
                   <button
                     onClick={handlePrint}
-                    class="w-full py-3 px-4 bg-gray-600 text-white rounded-lg font-medium hover:bg-gray-700 active:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                    class="w-full py-4 px-6 bg-gradient-to-r from-gray-600 to-gray-700 text-white rounded-xl font-bold text-lg hover:from-gray-700 hover:to-gray-800 active:scale-98 transition-all shadow-lg flex items-center justify-center gap-3"
                   >
-                    <span>🖨️</span>
+                    <span class="text-2xl">🖨️</span>
                     <span>Print PDF</span>
                   </button>
 
                   <button
                     onClick={() => setGeneratedPDF(null)}
-                    class="w-full py-2 px-4 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                    class="w-full py-3 px-6 bg-white text-gray-700 rounded-xl font-semibold hover:bg-gray-50 active:bg-gray-100 transition-colors border-2 border-gray-200"
                   >
-                    Generate New PDF
+                    Generate New PDF with Different Options
                   </button>
                 </div>
               </div>
@@ -720,14 +806,14 @@ const Print = () => {
             <button
               onClick={generatePDF}
               disabled={generating() || stats().totalNotes === 0}
-              class="w-full py-4 px-6 bg-blue-600 text-white rounded-lg font-semibold text-lg hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-3"
+              class="w-full py-5 px-8 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-bold text-xl hover:from-blue-700 hover:to-purple-700 active:scale-98 disabled:from-gray-300 disabled:to-gray-400 disabled:cursor-not-allowed transition-all shadow-xl flex items-center justify-center gap-4"
             >
-              <Show when={generating()} fallback={<span>🖨️</span>}>
-                <div class="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              <Show when={generating()} fallback={<span class="text-3xl">🖨️</span>}>
+                <div class="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin" />
               </Show>
               <span>
                 {generating()
-                  ? 'Generating PDF...'
+                  ? 'Generating Your Beautiful PDF...'
                   : stats().totalNotes === 0
                   ? 'No Notes to Export'
                   : 'Generate PDF Journal'}
@@ -737,18 +823,22 @@ const Print = () => {
 
           {/* Empty State */}
           <Show when={stats().totalNotes === 0}>
-            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mt-4">
-              <div class="flex items-start gap-3">
-                <span class="text-2xl">ℹ️</span>
+            <div class="bg-gradient-to-br from-yellow-50 to-orange-50 border-2 border-yellow-200 rounded-xl p-6 mt-6">
+              <div class="flex items-start gap-4">
+                <span class="text-4xl">ℹ️</span>
                 <div>
-                  <h4 class="font-semibold text-yellow-900 mb-1">
-                    No Notes Available
+                  <h4 class="font-bold text-yellow-900 text-lg mb-2">
+                    No Notes Available Yet
                   </h4>
-                  <p class="text-sm text-yellow-800">
+                  <p class="text-yellow-800 mb-3">
                     You need to create at least one note before you can export your
-                    journal. Visit the sites and add your reflections, photos, or
-                    audio recordings.
+                    journal. Start capturing your pilgrimage experience!
                   </p>
+                  <ul class="text-sm text-yellow-700 space-y-1 ml-4">
+                    <li>• Visit sacred sites and add your reflections</li>
+                    <li>• Capture photos of meaningful moments</li>
+                    <li>• Record audio notes with your thoughts</li>
+                  </ul>
                 </div>
               </div>
             </div>

@@ -1,8 +1,6 @@
 import { Component, createSignal, onMount, onCleanup, Show } from 'solid-js';
 import toast from 'solid-toast';
-import Camera from './icons/Camera';
-import Back from './icons/Back';
-import Reverse from './icons/Reverse';
+import Icon from './ui/Icon';
 
 export interface CameraCaptureProps {
   onCapture: (blob: Blob) => void;
@@ -16,6 +14,7 @@ const CameraCapture: Component<CameraCaptureProps> = (props) => {
   const [error, setError] = createSignal<string | null>(null);
   const [facingMode, setFacingMode] = createSignal<'user' | 'environment'>('environment');
   const [canSwitchCamera, setCanSwitchCamera] = createSignal(false);
+  const [flash, setFlash] = createSignal(false);
 
   let videoRef: HTMLVideoElement | undefined;
 
@@ -91,6 +90,10 @@ const CameraCapture: Component<CameraCaptureProps> = (props) => {
     if (!videoRef || !stream()) return;
 
     try {
+      // Trigger flash animation
+      setFlash(true);
+      setTimeout(() => setFlash(false), 200);
+
       // Create canvas to capture frame
       const canvas = document.createElement('canvas');
       canvas.width = videoRef.videoWidth;
@@ -117,12 +120,13 @@ const CameraCapture: Component<CameraCaptureProps> = (props) => {
 
             // Call the onCapture callback
             props.onCapture(blob);
+            toast.success('Photo captured!');
           } else {
             toast.error('Failed to capture image');
           }
         },
         'image/jpeg',
-        0.9
+        0.95
       );
     } catch (err: any) {
       toast.error(`Capture failed: ${err.message}`);
@@ -163,76 +167,89 @@ const CameraCapture: Component<CameraCaptureProps> = (props) => {
           />
         </Show>
 
+        {/* Flash animation */}
+        <Show when={flash()}>
+          <div class="absolute inset-0 bg-white animate-pulse pointer-events-none" />
+        </Show>
+
         {/* Loading state */}
         <Show when={loading()}>
-          <div class="absolute inset-0 flex items-center justify-center bg-black/50">
+          <div class="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#024359] to-[#015D7C] backdrop-blur-sm">
             <div class="text-white text-center">
-              <div class="animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent mx-auto mb-4"></div>
-              <p class="text-lg">Initializing camera...</p>
+              <div class="animate-spin rounded-full h-16 w-16 border-4 border-white border-t-transparent mx-auto mb-4"></div>
+              <p class="text-xl font-medium">Initializing camera...</p>
+              <p class="text-sm text-white/75 mt-2">Please allow camera access</p>
             </div>
           </div>
         </Show>
 
         {/* Error state */}
         <Show when={error()}>
-          <div class="absolute inset-0 flex items-center justify-center bg-black">
+          <div class="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-red-900/50 to-[#024359] backdrop-blur-sm">
             <div class="text-white text-center px-6 max-w-md">
-              <div class="mb-4">
-                <svg class="w-16 h-16 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
+              <div class="mb-6">
+                <Icon name="video-camera-slash" size={64} class="mx-auto text-red-400" />
               </div>
-              <p class="text-lg mb-2 font-semibold">Camera Unavailable</p>
-              <p class="text-sm text-gray-300">{error()}</p>
+              <p class="text-2xl mb-3 font-bold">Camera Unavailable</p>
+              <p class="text-base text-gray-200 leading-relaxed">{error()}</p>
             </div>
           </div>
         </Show>
 
-        {/* Close button (top left) */}
-        <button
-          onClick={handleClose}
-          class="absolute top-4 left-4 z-10 p-3 rounded-full bg-black/50 hover:bg-black/70 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-white"
-          aria-label="Close camera"
-        >
-          <Back color="white" size={24} />
-        </button>
+        {/* Top bar */}
+        <div class="absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/60 to-transparent p-4">
+          <div class="flex items-center justify-between">
+            {/* Close button */}
+            <button
+              onClick={handleClose}
+              class="p-2.5 rounded-full bg-black/30 hover:bg-black/50 backdrop-blur-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-95"
+              aria-label="Close camera"
+            >
+              <Icon name="x-mark" size={24} class="text-white" />
+            </button>
 
-        {/* Switch camera button (top right) - only show if multiple cameras available */}
-        <Show when={canSwitchCamera() && !loading() && !error()}>
-          <button
-            onClick={handleSwitchCamera}
-            class="absolute top-4 right-4 z-10 p-3 rounded-full bg-black/50 hover:bg-black/70 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-white"
-            aria-label="Switch camera"
-          >
-            <Reverse color="white" size={24} />
-          </button>
-        </Show>
+            {/* Site label (center) */}
+            <Show when={props.site}>
+              <div class="px-4 py-2 rounded-full bg-black/40 backdrop-blur-md border border-white/20">
+                <p class="text-white text-sm font-semibold">{props.site}</p>
+              </div>
+            </Show>
 
-        {/* Site label (top center) */}
-        <Show when={props.site}>
-          <div class="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm">
-            <p class="text-white text-sm font-medium">{props.site}</p>
+            {/* Switch camera button */}
+            <Show when={canSwitchCamera() && !loading() && !error()}>
+              <button
+                onClick={handleSwitchCamera}
+                class="p-2.5 rounded-full bg-black/30 hover:bg-black/50 backdrop-blur-sm transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/50 active:scale-95"
+                aria-label="Switch camera"
+              >
+                <Icon name="arrow-path" size={24} class="text-white" />
+              </button>
+            </Show>
+
+            {/* Spacer when no site or camera switch */}
+            <Show when={!props.site && (!canSwitchCamera() || loading() || error())}>
+              <div class="w-10" />
+            </Show>
           </div>
-        </Show>
+        </div>
       </div>
 
-      {/* Controls (bottom) */}
+      {/* Bottom control bar */}
       <Show when={!loading() && !error()}>
-        <div class="p-6 bg-black/80 backdrop-blur-sm">
-          <div class="flex items-center justify-center">
+        <div class="p-8 bg-gradient-to-t from-black via-black/95 to-black/80 backdrop-blur-md">
+          <div class="flex items-center justify-center gap-8">
             {/* Capture button */}
             <button
               onClick={handleCapture}
-              class="w-20 h-20 rounded-full bg-white border-4 border-gray-300 hover:border-gray-400 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-white/50 shadow-lg"
+              class="relative w-20 h-20 rounded-full bg-white hover:bg-gray-100 active:scale-95 transition-all duration-200 focus:outline-none focus:ring-4 focus:ring-white/30 shadow-2xl group"
               aria-label="Capture photo"
             >
-              <div class="w-full h-full rounded-full flex items-center justify-center">
-                <Camera color="#000" size={32} />
-              </div>
+              <div class="absolute inset-2 rounded-full border-4 border-gray-800 group-active:border-gray-600 transition-colors" />
+              <Icon name="camera" size={32} class="absolute inset-0 m-auto text-gray-800" />
             </button>
           </div>
 
-          <p class="text-white text-center text-sm mt-4 opacity-75">
+          <p class="text-white text-center text-sm mt-5 opacity-80 font-medium">
             Tap to capture photo
           </p>
         </div>
