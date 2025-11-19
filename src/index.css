@@ -1,7 +1,7 @@
-@import "tailwindcss";
-
 /* Google Fonts - Beautiful Typography */
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700;800&family=Inter:wght@300;400;500;600;700;800&family=Caveat:wght@400;500;600;700&display=swap');
+
+@import "tailwindcss";
 
 :root {
   --primary: #015D7C;
