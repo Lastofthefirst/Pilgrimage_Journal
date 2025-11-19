@@ -4,6 +4,15 @@ import { VitePWA } from 'vite-plugin-pwa';
 import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'pdfmake/build/pdfmake': 'pdfmake/build/pdfmake.js',
+      'pdfmake/build/vfs_fonts': 'pdfmake/build/vfs_fonts.js'
+    }
+  },
+  optimizeDeps: {
+    include: ['pdfmake']
+  },
   plugins: [
     solid(),
     tailwindcss(),

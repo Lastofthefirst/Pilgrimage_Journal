@@ -10,12 +10,17 @@ import {
   getDateRange,
   formatTimestamp,
 } from '../utils/pdfHelpers';
-import pdfMake from 'pdfmake/build/pdfmake';
-import pdfFonts from 'pdfmake/build/vfs_fonts';
+import * as pdfMakeLib from 'pdfmake/build/pdfmake';
+import * as pdfFonts from 'pdfmake/build/vfs_fonts';
 import toast from 'solid-toast';
 
+// TypeScript type for pdfMake
+const pdfMake = (pdfMakeLib as any).default || pdfMakeLib;
+
 // Register fonts
-pdfMake.vfs = pdfFonts.pdfMake.vfs;
+if (pdfFonts && (pdfFonts as any).pdfMake) {
+  pdfMake.vfs = (pdfFonts as any).pdfMake.vfs;
+}
 
 interface AllData {
   textNotes: TextNote[];
